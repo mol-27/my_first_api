@@ -2,141 +2,74 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List, Optional
+from database import database, metadata, engine
+from sqlalchemy import Table, Column, Integer, String, DateTime
 
-app = FastAPI(title="Мой первый рабочий API", version="1.0")
+app = FastAPI(title="Мой продакшен API", version="2.0")
 
+# --- 1. ОПРЕДЕЛЯЕМ ТАБЛИЦЫ В БАЗЕ (СХЕМА) ---
+users = Table(
+    "users",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("username", String),
+    Column("email", String),
+    Column("created_at", DateTime, default=datetime.utcnow),
+)
 
-# ========== МОДЕЛИ ДАННЫХ ==========
+articles = Table(
+    "articles",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("title", String),
+    Column("content", String),
+    Column("author", String),
+    Column("likes", Integer, default=0),
+    Column("created_at", DateTime, default=datetime.utcnow),
+)
+
+# Модели Pydantic остаются прежними
 class UserCreate(BaseModel):
     username: str
     email: str
-
 
 class ArticleCreate(BaseModel):
     title: str
     content: str
 
+# --- 2. СОБЫТИЯ ЗАПУСКА И ОСТАНОВА ---
+@app.on_event("startup")
+async def startup():
+    # Создаём таблицы в базе (если их нет)
+    metadata.create_all(bind=engine)
+    # Подключаемся к базе данных
+    await database.connect()
+    print("✅ База данных подключена")
 
-# ========== "БАЗА ДАННЫХ" В ПАМЯТИ ==========
-fake_db = {
-    "users": [],
-    "articles": []
-}
+@app.on_event("shutdown")
+async def shutdown():
+    # Отключаемся от базы при остановке
+    await database.disconnect()
+    print("❌ База данных отключена")
 
+# --- 3. ПЕРЕПИСЫВАЕМ ENDPOINTS ДЛЯ РАБОТЫ С БАЗОЙ ---
+@app.post("/users")
+async def create_user(user: UserCreate):
+    query = users.insert().values(
+        username=user.username,
+        email=user.email
+    )
+    user_id = await database.execute(query)
+    return {"message": "Пользователь создан", "id": user_id}
 
-# ========== ГЛАВНАЯ И HEALTHCHECK ==========
+@app.get("/users")
+async def get_users():
+    query = users.select()
+    all_users = await database.fetch_all(query)
+    return {"users": all_users}
+
+# (По аналогии переписываем endpoints для статей /articles, /articles/{id}/like)
+
 @app.get("/")
 def read_root():
-    return {
-        "message": "🚀 Мой API работает в интернете!",
-        "endpoints": {
-            "docs": "/docs",
-            "health": "/health",
-            "users": "/users",
-            "articles": "/articles"
-        },
-        "deployed": True
-    }
-
-
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "service": "My Deployed API"
-    }
-
-
-# ========== РАБОТА С ПОЛЬЗОВАТЕЛЯМИ ==========
-@app.get("/users", response_model=dict)
-def get_users():
-    return {
-        "count": len(fake_db["users"]),
-        "users": fake_db["users"]
-    }
-
-
-@app.post("/users", response_model=dict)
-def create_user(user: UserCreate):
-    user_id = len(fake_db["users"]) + 1
-    user_data = {
-        "id": user_id,
-        **user.dict(),
-        "created_at": datetime.now().isoformat()
-    }
-
-    fake_db["users"].append(user_data)
-    return {
-        "message": "✅ Пользователь создан",
-        "user": user_data
-    }
-
-
-@app.get("/users/{user_id}")
-def get_user(user_id: int):
-    if user_id <= 0 or user_id > len(fake_db["users"]):
-        return {"error": "Пользователь не найден"}
-    return fake_db["users"][user_id - 1]
-
-
-# ========== РАБОТА СО СТАТЬЯМИ ==========
-@app.get("/articles")
-def get_articles():
-    return {
-        "count": len(fake_db["articles"]),
-        "articles": fake_db["articles"]
-    }
-
-
-@app.post("/articles")
-def create_article(article: ArticleCreate, author_id: int = 1):
-    author = fake_db["users"][0] if fake_db["users"] else {"username": "Anonymous"}
-
-    article_id = len(fake_db["articles"]) + 1
-    article_data = {
-        "id": article_id,
-        **article.dict(),
-        "author": author.get("username", "Anonymous"),
-        "author_id": author_id,
-        "created_at": datetime.now().isoformat(),
-        "likes": 0
-    }
-
-    fake_db["articles"].append(article_data)
-    return {
-        "message": "✅ Статья создана",
-        "article": article_data
-    }
-
-
-@app.post("/articles/{article_id}/like")
-def like_article(article_id: int):
-    if article_id <= 0 or article_id > len(fake_db["articles"]):
-        return {"error": "Статья не найдена"}
-
-    fake_db["articles"][article_id - 1]["likes"] += 1
-    return {
-        "message": f"❤️ Лайк добавлен статье {article_id}",
-        "likes": fake_db["articles"][article_id - 1]["likes"]
-    }
-
-
-# ========== НОВЫЙ ENDPOINT ДЛЯ ПОИСКА ==========
-@app.get("/articles/search")
-def search_articles(q: str):
-    """Поиск статей по ключевому слову в заголовке"""
-    if not q:
-        return {"results": []}
-
-    results = [
-        article for article in fake_db["articles"]
-        if q.lower() in article["title"].lower()
-    ]
-
-    return {
-        "query": q,
-        "count": len(results),
-        "results": results
-    }
+    return {"message": "🚀 Продакшен API с PostgreSQL работает!"}
