@@ -3,3 +3,4 @@ uvicorn[standard]
 sqlalchemy
 asyncpg
 databases[postgresql]
+psycopg2-binary
