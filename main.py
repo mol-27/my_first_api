@@ -73,3 +73,11 @@ async def get_users():
 @app.get("/")
 def read_root():
     return {"message": "🚀 Продакшен API с PostgreSQL работает!"}
+
+@app.delete("/users/{user_id}")
+async def delete_user(user_id: int):
+    query = users.delete().where(users.c.id == user_id)
+    result = await database.execute(query)
+    if result:
+        return {"message": f"Пользователь {user_id} удалён"}
+    return {"error": "Пользователь не найден"}
